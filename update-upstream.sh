@@ -1,0 +1,21 @@
+#!/bin/bash
+
+cd "/Users/sgoeddel/projects/$1"
+
+branch=`git rev-parse --abbrev-ref HEAD`
+
+echo checking out master in:
+pwd
+git checkout master
+
+echo fetching upstream
+git fetch upstream
+
+echo merging upstream
+git merge upstream/master
+
+echo pushing
+git push origin master
+
+echo "checking out $branch"
+git checkout $branch
