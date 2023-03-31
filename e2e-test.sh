@@ -28,16 +28,16 @@ fi
 echo "Cleaning test cache"
 go clean -testcache
 
-echo "removing tmp kubeconfig"
-rm -rf $tmpdir/.ci-operator-kubeconfig
+cluster=$(oc config current-context)
+echo "Running on context: $cluster"
 
-echo "Running on context: "
-oc config current-context
+echo "adding tmp kubeconfig and token"
+oc extract secret/ci-operator -n test-credentials --as system:admin
 
 echo "If a registry credentials issue occurs switch to app.ci context and run 'oc registry login'"
-
 TMPDIR=$tmpdir \
   ARTIFACT_DIR=$artifactDir \
+  # UPDATE=true \
   make local-e2e \
   TESTFLAGS="-run $1" \
   GOTESTSUM_FORMAT=standard-verbose
