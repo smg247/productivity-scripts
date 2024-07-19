@@ -14,10 +14,10 @@ echo fetching upstream
 git fetch upstream
 
 echo merging upstream
-git merge upstream/master
+git merge upstream/$master
 
 echo pushing
-git push origin master
+git push origin $master
 
 echo "checking out $branch"
 git checkout $branch
