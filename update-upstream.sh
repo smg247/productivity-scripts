@@ -4,9 +4,11 @@ cd "/Users/sgoeddel/projects/$1"
 
 branch=`git rev-parse --abbrev-ref HEAD`
 
-echo checking out master in:
+master=`git branch -l main master --format '%(refname:short)'`
+
+echo "checking out $master in:"
 pwd
-git checkout master
+git checkout $master
 
 echo fetching upstream
 git fetch upstream
