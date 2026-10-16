@@ -32,7 +32,10 @@ cluster=$(oc config current-context)
 echo "Running on context: $cluster"
 
 echo "adding tmp kubeconfig and token"
-oc extract secret/ci-operator -n test-credentials --as system:admin
+oc extract secret/ci-operator -n test-credentials --as system:admin --confirm
+
+# echo "adding manifest-tool secret"
+# oc --context app.ci extract secret/manifest-tool-local-pusher -n ci --as system:admin --to ${tmpdir}/secrets/manifest-tool --confirm
 
 echo "If a registry credentials issue occurs switch to app.ci context and run 'oc registry login'"
 TMPDIR=$tmpdir \
