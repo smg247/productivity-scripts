@@ -1,25 +1,28 @@
 #!/bin/bash
 #
-# update-repo.sh — context-aware wrapper for the `update <repo>`
-# shell alias (productivity-scripts/update-upstream.sh), which merges a
-# repository from its upstream remote, pushes to origin, and restores the
-# original branch.
+# update-repo.sh — context-aware frontend to update-upstream.sh, which
+# merges a repository's main/master branch from its upstream remote, pushes
+# it to origin, and restores the original branch. update-upstream.sh is
+# invoked directly (not through the `update` shell alias), so this works
+# both on the host and inside devcontainers where the repositories are
+# mounted.
 #
 # Context detection is based on the current working directory:
 #
-#   * inside a git repository checked out under ~/Projects: update only
-#     that repository;
+#   * inside a git repository: update only that repository;
 #   * inside a development-environment directory (the current directory or
-#     an ancestor containing .devcontainer/devcontainer.json): update every
+#     an ancestor containing .devcontainer/devcontainer.json, including the
+#     container layout <workspace>/.dev-environment): update every
 #     composite repository bind-mounted by that environment, discovered
-#     from its devcontainer.json.
+#     from its devcontainer.json (writable sibling bind mounts). Each
+#     repository resolves to its host checkout or its in-container mount
+#     target, whichever exists.
 #
 # For each targeted repository the script:
 #
-#   1. runs the host shell alias `update <repo>` (defined in ~/.zshrc),
-#      which saves the current branch, checks out main, merges from the
-#      upstream remote, pushes to origin, and returns to the original
-#      branch;
+#   1. runs update-upstream.sh, which saves the current branch, checks out
+#      main, merges from the upstream remote, pushes to origin, and returns
+#      to the original branch;
 #   2. checks out main.
 #
 # Uncommitted changes (including untracked files) are detected before
@@ -32,8 +35,9 @@
 #   --stash   stash uncommitted changes and leave them stashed afterwards
 #   --revert  discard uncommitted changes (git reset --hard + git clean -fd)
 #
-# This script is host-side only: it depends on the `update` alias from
-# ~/.zshrc, which does not exist inside devcontainers.
+# Pushing to origin requires git credentials available in the environment
+# where this script runs (inside devcontainers, SSH remotes need keys the
+# container can access).
 #
 # Usage:
 #   update-repo.sh check                       report context and tree state
@@ -48,7 +52,7 @@
 
 set -u
 
-PROJECTS_DIR="${PROJECTS_DIR:-$HOME/Projects}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ACTION=""
 MODE=""
 TARGETS=""       # newline-separated "name<TAB>directory" entries
@@ -83,6 +87,13 @@ detect_context() {
       resolve_environment "$dir"
       return 0
     fi
+    if [ -f "$dir/.dev-environment/.devcontainer/devcontainer.json" ]; then
+      # container layout: the environment folder is mounted inside the
+      # container workspace
+      MODE=env
+      resolve_environment "$dir/.dev-environment"
+      return 0
+    fi
     if [ "$dir" = "/" ]; then
       return 1
     fi
@@ -91,46 +102,58 @@ detect_context() {
 }
 
 resolve_single_repo() {
-  local root="$1" alias_dir
+  local root="$1"
   local name
   name="$(basename "$root")"
-  alias_dir="$PROJECTS_DIR/$name"
-  if [ ! -d "$alias_dir" ] || ! git -C "$alias_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    fail "the repository at $root is not directly under $PROJECTS_DIR, which the 'update' alias requires."
-  fi
-  if [ "$(git -C "$alias_dir" rev-parse --show-toplevel 2>/dev/null)" != "$root" ]; then
-    fail "$alias_dir is a different repository than $root; refusing to update the wrong checkout."
-  fi
-  TARGETS="$(printf '%s\t%s\n' "$name" "$alias_dir")"
+  TARGETS="$(printf '%s\t%s\n' "$name" "$root")"
   TARGET_LABEL="repository $name"
 }
 
 resolve_environment() {
   local env_dir="$1"
-  local dc base match src tgt name
+  local dc base match src tgt name dir
   dc="$env_dir/.devcontainer/devcontainer.json"
   base="$(cd "$env_dir/../.." 2>/dev/null && pwd -P)" || fail "cannot resolve the repository base directory for $env_dir."
   TARGETS=""
   while IFS= read -r match; do
     [ -z "$match" ] && continue
+    case "$match" in
+      *readonly*) continue ;;   # read-only mounts are tooling, not composite repos
+    esac
     src="${match#source=}"
     src="${src%%,*}"
-    tgt="${match##*,target=}"
+    tgt="${match#*,target=}"
+    tgt="${tgt%%,*}"
     name="${tgt#/workspace/}"
     case "$name" in
       */*|"") continue ;;
     esac
     if [ "$src" = "\${localWorkspaceFolder}/../../$name" ]; then
-      TARGETS="$TARGETS$name$TAB$base/$name
+      # resolve to the host checkout (sibling of the environment's parent)
+      # or to the in-container mount target, whichever is a git repository
+      dir=""
+      if git -C "$base/$name" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        dir="$base/$name"
+      elif git -C "$tgt" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        dir="$tgt"
+      else
+        dir="$base/$name"   # validate_targets reports a clear error
+      fi
+      TARGETS="$TARGETS$name$TAB$dir
 "
     fi
   done <<EOF
-$(grep -o 'source=[^,]*,target=/workspace/[^,"]*' "$dc")
+$(grep -o 'source=[^"]*' "$dc")
 EOF
   if [ -z "$TARGETS" ]; then
     fail "no composite repositories found in $dc."
   fi
-  TARGET_LABEL="environment $(basename "$env_dir") ($(printf '%s\n' "$TARGETS" | cut -f1 | tr '\n' ' ' | sed 's/ *$//'))"
+  local label
+  label="$(basename "$env_dir")"
+  if [ "$label" = ".dev-environment" ]; then
+    label="container workspace"
+  fi
+  TARGET_LABEL="environment $label ($(printf '%s\n' "$TARGETS" | cut -f1 | tr '\n' ' ' | sed 's/ *$//'))"
 }
 
 validate_targets() {
@@ -141,7 +164,7 @@ validate_targets() {
       fail "$dir is not a git repository."
     fi
     if [ -z "$(git -C "$dir" config remote.upstream.url)" ]; then
-      fail "$name has no 'upstream' remote, which the 'update' alias requires."
+      fail "$name has no 'upstream' remote, which update-upstream.sh requires."
     fi
   done <<EOF
 $TARGETS
@@ -218,7 +241,7 @@ EOF
 
 cmd_run() {
   local name dir handled handled_short update_ok checkout_ok branch tree stashed
-  local failures=0 need_decision=0 summary=""
+  local failures=0 need_decision=0 summary="" left_on_branch=0
 
   while IFS="$TAB" read -r name dir; do
     [ -z "$name" ] && continue
@@ -285,9 +308,9 @@ EOF
     fi
     echo "$handled"
 
-    echo "running 'update $name' (checkout main, merge upstream, push origin, restore branch)..."
+    echo "running update-upstream.sh in $name (checkout main, merge upstream, push origin, restore branch)..."
     update_ok=yes
-    zsh -ic "update $name" || { update_ok=no; failures=1; }
+    "$SCRIPT_DIR/update-upstream.sh" "$dir" || { update_ok=no; failures=1; }
     echo "update: $update_ok"
 
     if [ "$stashed" = "yes" ] && [ "$ACTION" = "keep" ]; then
@@ -305,7 +328,17 @@ EOF
       checkout_ok=skipped
     else
       checkout_ok=yes
-      git -C "$dir" checkout main >/dev/null 2>&1 || { checkout_ok=no; failures=1; }
+      if ! git -C "$dir" checkout main >/dev/null 2>&1; then
+        if [ "$ACTION" = "keep" ]; then
+          # expected --keep outcome: the restored changes belong to the
+          # original branch and block switching to main; leave them there
+          checkout_ok="left on branch"
+          left_on_branch=$((left_on_branch + 1))
+        else
+          checkout_ok=no
+          failures=1
+        fi
+      fi
     fi
     branch="$(git -C "$dir" branch --show-current 2>/dev/null)"
     if is_dirty "$dir"; then tree="dirty"; else tree="clean"; fi
@@ -321,7 +354,12 @@ EOF
   echo "================ summary ================"
   printf '%s' "$summary"
   if [ "$failures" -eq 0 ]; then
-    echo "Done: every targeted repository updated and checked out on main."
+    if [ "$left_on_branch" -gt 0 ]; then
+      echo "Done: every targeted repository updated. Repositories whose restored"
+      echo "changes block switching to main remain on their original branch."
+    else
+      echo "Done: every targeted repository updated and checked out on main."
+    fi
   else
     echo >&2
     echo "WARNING: some steps failed; review the output above." >&2

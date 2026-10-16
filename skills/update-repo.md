@@ -8,12 +8,13 @@ reference this file rather than duplicating it. The companion script is
 
 ---
 
-Update repositories by running the host shell alias `update <repo>` in each,
-then checking out `main` in each. The helper script is context-aware: when
-run inside a single repository it updates only that repository; when run
-inside a dev-environments environment directory (such as
-`ship-status-chai-release`) it updates all of that environment's composite
-repositories.
+Update repositories by running `update-upstream.sh` in each (it saves the
+current branch, merges `main` from the upstream remote, pushes to `origin`,
+and restores the original branch), then checking out `main` in each. The
+helper script is context-aware: when run inside a single repository it
+updates only that repository; when run inside a dev-environments
+environment directory (such as `ship-status-chai-release`) it updates all
+of that environment's composite repositories.
 
 Drive `~/Projects/productivity-scripts/update-repo.sh` with your shell tool,
 from the session's current working directory, following these steps exactly:
@@ -41,10 +42,18 @@ from the session's current working directory, following these steps exactly:
 4. After the script finishes, report what it did: the detected context, and
    for each repository whether uncommitted changes were kept, stashed (with
    restore instructions), or reverted, whether the upstream update succeeded,
-   the final branch (expected `main`), and the working-tree state. Call out
-   any failures explicitly and include the relevant error output.
+   the final branch, and the working-tree state. The final branch is
+   expected to be `main`, except that with "leave the changes in place" a
+   repository may remain on its original branch when the restored changes
+   block switching to main — report that outcome as the script states it,
+   not as a failure. Call out any failures explicitly and include the
+   relevant error output.
 
-This command is host-side only — the `update` alias comes from `~/.zshrc`
-and does not exist inside devcontainers. If the script reports that no
-context was found, tell me the session's directory must be a repository
-under `~/Projects` or a dev-environments environment directory.
+This command works on the host and inside devcontainers (where the
+repositories and `productivity-scripts` are mounted). Pushing to `origin`
+requires git credentials available in the environment where it runs — if a
+push or fetch fails with an authentication error, report that the
+environment lacks credentials for the repository's remotes rather than
+retrying. If the script reports that no context was found, tell me the
+session's directory must be a repository or a dev-environments environment
+directory.
