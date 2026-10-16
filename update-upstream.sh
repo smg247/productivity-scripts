@@ -23,7 +23,14 @@ cd "$repo" 2>/dev/null || { echo "ERROR: no such repository: $1" >&2; exit 1; }
 
 branch=$(git rev-parse --abbrev-ref HEAD)
 
-master=$(git branch -l main master --format '%(refname:short)')
+if git show-ref --verify --quiet refs/heads/main; then
+  master=main
+elif git show-ref --verify --quiet refs/heads/master; then
+  master=master
+else
+  echo "ERROR: no main or master branch in $repo" >&2
+  exit 1
+fi
 
 echo "checking out $master in:"
 pwd
