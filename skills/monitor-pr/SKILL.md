@@ -1,7 +1,14 @@
-# Monitor pull requests for new comments — `/monitor-pr` command definition
+---
+name: monitor-pr
+description: Monitor one or more GitHub PRs for new review comments, defaulting to every 10 minutes for 6 hours. Drafts code fixes and replies, checks out the PR branch when it has changed, and waits for explicit confirmation before pushing or replying. Use when asked to watch, monitor, or loop on PRs for feedback, e.g. "/monitor-pr 10m 2h owner/repo#123" or "/monitor-pr owner/repo#123" for defaults.
+---
 
-This file is the single source of truth for the `/monitor-pr` command.
-User-level command stubs in Claude Code (`~/.claude/commands/`), Cursor
+# Monitor pull requests for new comments
+
+This file is the single source of truth for the `/monitor-pr` skill.
+OpenCode consumes it directly via a symlink
+(`~/.config/opencode/skills/monitor-pr` → this directory). User-level
+command stubs in Claude Code (`~/.claude/commands/`), Cursor
 (`~/.cursor/commands/`), OpenCode (`~/.config/opencode/commands/`), and
 Codex (`~/.codex/skills/monitor-pr/`) reference this file rather than
 duplicating it.
