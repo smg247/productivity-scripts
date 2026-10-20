@@ -114,20 +114,46 @@ comments that arrive after monitoring starts.
 
 ### 3. Arm the recurring check
 
-Arm one recurring wake-up every `<interval>` using your tool's
-background-task or scheduling capability, so each tick arrives as a
-notification rather than blocking the session. A portable bash pattern:
+Each tick must wake you as a distinct event. The wake-up mechanism
+matters more than anything else in this step — a monitor that cannot
+wake you is useless.
+
+**Default: one-shot sleeper per tick.** Most agent tools (including
+OpenCode) only notify on background-task *completion*, not on individual
+output lines. For those, arm a single-interval sleeper that completes —
+its completion notification is the wake-up:
+
+```bash
+sleep <seconds>; printf 'AGENT_LOOP_TICK_monitor_pr {"tick":"<n>","deadline":"<stop-epoch>"}\n'
+```
+
+Run it as a background task and record its handle or PID. When it
+completes and wakes you: run the tick checks (step 4), then arm the next
+one-shot sleeper with tick `n+1` — but only if the current time is
+before the stop deadline. `<stop-epoch>` is the Unix time monitoring
+ends, computed once in step 1.
+
+**Never** arm a multi-tick or infinite `while` loop as a single
+background task in a completion-notified tool: it will silently run the
+entire duration and deliver every accumulated tick line at the end.
+
+If your tool *does* notify on individual background output lines (for
+example Cursor's `notify_on_output`), you may instead arm one
+continuous loop for the whole duration and act on each
+`AGENT_LOOP_TICK_monitor_pr` line as it arrives:
 
 ```bash
 i=0; total=<ticks>; while [ "$i" -lt "$total" ]; do sleep <seconds>; i=$((i+1)); printf 'AGENT_LOOP_TICK_monitor_pr {"tick":"%s"}\n' "$i"; done
 ```
 
-Run it as a background task with output notifications enabled and act on
-each `AGENT_LOOP_TICK_monitor_pr` line. `<ticks>` is the duration divided
-by the interval. If your tool cannot notify on background output, run the
-checks inline with a `sleep <interval>` between ticks instead. Arm
-exactly one loop; if one is already running for this purpose, reuse it
-and do not arm a second.
+If your tool cannot run background tasks at all, fall back to inline
+ticks: a foreground `sleep <interval>` before each round of checks.
+
+If the session already has a scheduling capability (such as the `loop`
+skill or a subscription timer), prefer delegating the recurring wake to
+it rather than arming your own sleeper. Whichever mechanism you use,
+have exactly one pending wake-up; if one is already armed for this
+purpose, reuse it and do not arm a second.
 
 Tell me the interval, the duration, when monitoring will stop, and the
 PR list.
@@ -152,7 +178,9 @@ and CI status as in step 2, and compare against the seen-baseline:
   monitoring that PR.
 
 Mark items seen only after you have reported them or drafted a response
-for them. Always give me the short per-tick status.
+for them. Always give me the short per-tick status. At the end of the
+tick, re-arm the next wake-up (step 3) if the stop deadline has not
+passed — forgetting to re-arm silently ends the monitor.
 
 ### 5. Act on actionable comments (draft only)
 
@@ -203,8 +231,10 @@ ask again.
 
 ### 7. Ending
 
-When the duration elapses or I ask you to stop, kill any background loop
-you armed, send a final notification that monitoring has ended, confirm
-the loop has stopped and why, and summarize the run: ticks executed,
+When the duration elapses or I ask you to stop, stop the wake chain:
+kill any pending sleeper or loop you armed, await its completion
+notification so it does not wake you later, and arm nothing further.
+Send a final notification that monitoring has ended, confirm the
+loop has stopped and why, and summarize the run: ticks executed,
 comments addressed, replies and pushes published, and anything left
 drafted but unconfirmed.
